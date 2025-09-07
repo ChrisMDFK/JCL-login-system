@@ -13,7 +13,7 @@ CMD ["npm", "run", "dev"]
 FROM node:18-alpine AS build
 WORKDIR /app
 COPY package*.json ./
-RUN npm ci --only=production && npm cache clean --force
+RUN npm ci && npm cache clean --force
 COPY . .
 RUN npm run build
 
