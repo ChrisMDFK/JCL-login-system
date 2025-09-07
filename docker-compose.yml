@@ -120,6 +120,8 @@ services:
       context: ./frontend
       dockerfile: Dockerfile
       target: production
+      args:
+        NEXT_PUBLIC_API_URL: https://api.jcl-system.com
     container_name: jcl-frontend
     environment:
       NODE_ENV: production
