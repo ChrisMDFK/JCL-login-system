@@ -77,7 +77,7 @@ class JCLAuthApplication {
 
     // CORS 設定
     this.app.use(cors({
-      origin: config.corsOrigins,
+      origin: config.security.corsOrigins,
       credentials: true,
       methods: ['GET', 'POST', 'PUT', 'PATCH', 'DELETE', 'OPTIONS'],
       allowedHeaders: [
