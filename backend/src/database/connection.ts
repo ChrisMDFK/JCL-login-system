@@ -36,6 +36,9 @@ class DatabaseManager {
       const connectionString = config.database.url;
       logger.info('嘗試連接資料庫', { url: connectionString.replace(/:[^:@]*@/, ':***@') });
 
+      const connectionString = config.database.url;
+      logger.info('嘗試連接資料庫', { url: connectionString.replace(/:[^:@]*@/, ':***@') });
+
       this.pool = new Pool({
         connectionString,
         // PgBouncer 相容設定

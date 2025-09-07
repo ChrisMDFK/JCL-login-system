@@ -164,11 +164,46 @@ export default function HomePage() {
         {/* 快速操作 */}
         <div className="text-center mt-16">
           <div className="space-x-4">
-            <button className="btn btn-primary btn-lg">
-              開始使用
-            </button>
+            <a href="/login" className="btn btn-primary btn-lg">
+              登入系統
+            </a>
             <button className="btn btn-outline btn-lg">
               查看文件
+            </button>
+          </div>
+        </div>
+
+        {/* API 測試區域 */}
+        <div className="card max-w-4xl mx-auto mt-16">
+          <h2 className="text-2xl font-semibold mb-6">API 測試</h2>
+          <div className="grid md:grid-cols-2 gap-4">
+            <button
+              onClick={async () => {
+                try {
+                  const response = await fetch('/api/health');
+                  const data = await response.json();
+                  alert(`健康檢查: ${JSON.stringify(data, null, 2)}`);
+                } catch (error) {
+                  alert(`錯誤: ${error}`);
+                }
+              }}
+              className="btn btn-secondary btn-md"
+            >
+              測試健康檢查
+            </button>
+            <button
+              onClick={async () => {
+                try {
+                  const response = await fetch('http://localhost:3001/health');
+                  const data = await response.json();
+                  alert(`後端健康檢查: ${JSON.stringify(data, null, 2)}`);
+                } catch (error) {
+                  alert(`錯誤: ${error}`);
+                }
+              }}
+              className="btn btn-secondary btn-md"
+            >
+              測試後端 API
             </button>
           </div>
         </div>

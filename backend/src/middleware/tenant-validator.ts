@@ -18,6 +18,8 @@ export async function validateTenant(req: Request, res: Response, next: NextFunc
       '/csp-report',
       '/api/auth/login',
       '/api/auth/register'
+      '/api/auth/login',
+      '/api/auth/register'
     ];
 
     if (skipTenantValidation.some(path => req.path.startsWith(path))) {
