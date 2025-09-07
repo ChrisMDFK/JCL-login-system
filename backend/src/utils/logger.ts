@@ -1,5 +1,5 @@
 import winston from 'winston';
-import { config } from '../config';
+import config from '../config';
 
 /**
  * JCL 企業級身分驗證系統 - 日誌管理器
