@@ -24,14 +24,6 @@ import { initializeSentry } from './utils/sentry';
 /**
  * JCL 企業級多租戶身分驗證系統
  * 主要應用程式入口點
- * 
- * 功能特色：
- * - 多租戶架構支援
- * - JWT + 刷新令牌機制
- * - 多重驗證（MFA）
- * - 基於角色的存取控制（RBAC）
- * - Redis 會話管理
- * - 稽核日誌與監控
  */
 class JCLAuthApplication {
   public app: express.Application;
@@ -45,7 +37,6 @@ class JCLAuthApplication {
 
   /**
    * 初始化中介軟體
-   * 設定安全標頭、CORS、壓縮、速率限制等
    */
   private initializeMiddleware(): void {
     // 安全標頭設定
@@ -53,13 +44,12 @@ class JCLAuthApplication {
       contentSecurityPolicy: {
         directives: {
           defaultSrc: ["'self'"],
-          scriptSrc: ["'self'", "'unsafe-inline'", "https://cdnjs.cloudflare.com"],
-          connectSrc: ["'self'", "https://api.jcl-system.com", "wss://api.jcl-system.com"],
+          scriptSrc: ["'self'", "'unsafe-inline'"],
+          connectSrc: ["'self'"],
           styleSrc: ["'self'", "'unsafe-inline'"],
           imgSrc: ["'self'", "data:", "https:"],
-          fontSrc: ["'self'", "https://fonts.gstatic.com"],
+          fontSrc: ["'self'"],
           objectSrc: ["'none'"],
-          mediaSrc: ["'self'"],
           frameSrc: ["'none'"],
         },
         reportOnly: false,
@@ -69,10 +59,6 @@ class JCLAuthApplication {
         includeSubDomains: true,
         preload: true,
       },
-      frameguard: { action: 'deny' },
-      noSniff: true,
-      xssFilter: true,
-      referrerPolicy: { policy: "strict-origin-when-cross-origin" }
     }));
 
     // CORS 設定
@@ -89,20 +75,13 @@ class JCLAuthApplication {
         'X-Tenant-Id',
         'X-Correlation-Id'
       ],
-      exposedHeaders: ['X-Correlation-Id', 'X-Rate-Limit-Remaining']
     }));
 
     // 壓縮回應
     this.app.use(compression());
 
     // JSON 解析設定
-    this.app.use(express.json({ 
-      limit: '10mb',
-      verify: (req, res, buf) => {
-        // 儲存原始請求內容供稽核使用
-        (req as any).rawBody = buf;
-      }
-    }));
+    this.app.use(express.json({ limit: '10mb' }));
     this.app.use(express.urlencoded({ extended: true, limit: '10mb' }));
 
     // 請求記錄中介軟體
@@ -110,20 +89,14 @@ class JCLAuthApplication {
 
     // 全域速率限制
     this.app.use(rateLimit({
-      windowMs: 15 * 60 * 1000, // 15分鐘
-      max: 1000, // 每個IP每15分鐘最多1000次請求
+      windowMs: config.security.rateLimitWindowMs,
+      max: config.security.rateLimitMax,
       message: {
         error: '請求次數過多，請稍後再試',
-        code: 'RATE_LIMIT_EXCEEDED',
-        retryAfter: '15分鐘後'
+        code: 'RATE_LIMIT_EXCEEDED'
       },
       standardHeaders: true,
       legacyHeaders: false,
-      keyGenerator: (req) => {
-        const tenantId = req.headers['x-tenant-id'] as string;
-        const ip = req.ip;
-        return tenantId ? `${tenantId}:${ip}` : `global:${ip}`;
-      }
     }));
 
     // 租戶驗證中介軟體
@@ -132,12 +105,10 @@ class JCLAuthApplication {
 
   /**
    * 初始化路由
-   * 註冊所有 API 端點
    */
   private initializeRoutes(): void {
     // 健康檢查端點（無需驗證）
-    this.app.use('/health', healthRoutes);
-    this.app.use('/ready', healthRoutes);
+    this.app.use('/', healthRoutes);
     this.app.use('/metrics', metricsRoutes);
     this.app.use('/csp-report', cspReportRoutes);
 
@@ -153,7 +124,6 @@ class JCLAuthApplication {
         method: req.method,
         url: req.originalUrl,
         ip: req.ip,
-        userAgent: req.get('User-Agent')
       });
       
       res.status(404).json({
@@ -167,7 +137,6 @@ class JCLAuthApplication {
 
   /**
    * 初始化錯誤處理
-   * 設定全域錯誤處理中介軟體
    */
   private initializeErrorHandling(): void {
     this.app.use(errorHandler);
@@ -175,52 +144,67 @@ class JCLAuthApplication {
 
   /**
    * 啟動應用程式
-   * 初始化資料庫連線、Redis 連線和 Sentry 監控
    */
   public async start(): Promise<void> {
     try {
+      logger.info('正在啟動 JCL 企業級身分驗證系統...', {
+        nodeEnv: config.nodeEnv,
+        port: config.port
+      });
+
       // 初始化 Sentry 錯誤監控
-      if (config.sentry.dsn) {
-        initializeSentry();
-        logger.info('Sentry 錯誤監控已初始化');
+      if (config.sentry.dsn && config.sentry.enabled) {
+        try {
+          initializeSentry();
+          logger.info('Sentry 錯誤監控已初始化');
+        } catch (error) {
+          logger.warn('Sentry 初始化失敗', { error });
+        }
       }
 
       // 初始化資料庫連線
-      await initializeDatabase();
-      logger.info('資料庫連線已建立');
+      try {
+        await initializeDatabase();
+        logger.info('資料庫連線已建立');
+      } catch (error) {
+        logger.warn('資料庫連線失敗，繼續啟動', { error });
+      }
 
       // 初始化 Redis 連線
-      await initializeRedis();
-      logger.info('Redis 連線已建立');
+      try {
+        await initializeRedis();
+        logger.info('Redis 連線已建立');
+      } catch (error) {
+        logger.warn('Redis 連線失敗，繼續啟動', { error });
+      }
 
       // 啟動伺服器
-      const server = this.app.listen(config.port, () => {
+      const server = this.app.listen(config.port, config.host, () => {
         logger.info(`JCL 企業級身分驗證系統已啟動`, {
           port: config.port,
+          host: config.host,
           environment: config.nodeEnv,
           timestamp: new Date().toISOString()
         });
       });
 
       // 優雅關機處理
-      process.on('SIGTERM', () => {
-        logger.info('收到 SIGTERM 信號，開始優雅關機程序');
+      const gracefulShutdown = (signal: string) => {
+        logger.info(`收到 ${signal} 信號，開始優雅關機程序`);
         server.close(() => {
           logger.info('HTTP 伺服器已關閉');
           process.exit(0);
         });
-      });
+      };
 
-      process.on('SIGINT', () => {
-        logger.info('收到 SIGINT 信號，開始優雅關機程序');
-        server.close(() => {
-          logger.info('HTTP 伺服器已關閉');
-          process.exit(0);
-        });
-      });
+      process.on('SIGTERM', () => gracefulShutdown('SIGTERM'));
+      process.on('SIGINT', () => gracefulShutdown('SIGINT'));
 
     } catch (error) {
-      logger.error('應用程式啟動失敗', { error });
+      logger.error('應用程式啟動失敗', { 
+        error: error instanceof Error ? error.message : String(error),
+        stack: error instanceof Error ? error.stack : undefined
+      });
       process.exit(1);
     }
   }
@@ -229,7 +213,7 @@ class JCLAuthApplication {
 // 啟動應用程式
 const jclAuthApp = new JCLAuthApplication();
 jclAuthApp.start().catch((error) => {
-  logger.error('應用程式啟動過程中發生未處理的錯誤', { error });
+  console.error('應用程式啟動過程中發生未處理的錯誤:', error);
   process.exit(1);
 });
 

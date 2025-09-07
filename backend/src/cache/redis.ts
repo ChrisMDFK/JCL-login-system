@@ -1,10 +1,9 @@
 import { createClient, RedisClientType } from 'redis';
-import { config } from '../config';
+import config from '../config';
 import { logger } from '../utils/logger';
 
 /**
  * Redis 快取管理器
- * 提供會話儲存和快取功能
  */
 class RedisManager {
   private client: RedisClientType | null = null;
@@ -15,24 +14,24 @@ class RedisManager {
    */
   public async initialize(): Promise<void> {
     try {
-      // 在開發環境中等待 Redis 服務啟動
-      if (config.nodeEnv === 'development') {
-        logger.info('開發環境：等待 Redis 服務啟動...');
-        await new Promise(resolve => setTimeout(resolve, 3000));
+      // Skip Redis in development if not available
+      if (config.nodeEnv === 'development' && !config.redis.enabled) {
+        logger.info('Redis disabled in development mode');
+        return;
       }
 
       // 在開發環境中等待 Redis 服務啟動
       if (config.nodeEnv === 'development') {
         logger.info('開發環境：等待 Redis 服務啟動...');
-        await new Promise(resolve => setTimeout(resolve, 3000));
+        await new Promise(resolve => setTimeout(resolve, 2000));
       }
 
       this.client = createClient({
         url: config.redis.url,
-        password: config.redis.password,
+        password: config.redis.password || undefined,
         database: config.redis.db,
         socket: {
-          connectTimeout: 10000,
+          connectTimeout: 5000,
           lazyConnect: true
         }
       });
@@ -49,7 +48,7 @@ class RedisManager {
 
       this.client.on('error', (error) => {
         this.isConnected = false;
-        logger.error('Redis 連線錯誤', { error: error.message });
+        logger.warn('Redis 連線錯誤', { error: error.message });
       });
 
       this.client.on('end', () => {
@@ -65,8 +64,8 @@ class RedisManager {
       
       logger.info('Redis 初始化成功');
     } catch (error) {
-      logger.error('Redis 初始化失敗', { error });
-      throw new Error(`Redis 連線失敗: ${error}`);
+      logger.warn('Redis 初始化失敗，繼續運行但不使用快取', { error });
+      // Don't throw error, just continue without Redis
     }
   }
 
@@ -75,15 +74,20 @@ class RedisManager {
    */
   public async set(key: string, value: string, ttl?: number): Promise<void> {
     if (!this.client || !this.isConnected) {
-      throw new Error('Redis 連線未建立');
+      logger.warn('Redis 連線未建立，跳過快取設定');
+      return;
     }
 
-    const fullKey = `${config.redis.keyPrefix}${key}`;
-    
-    if (ttl) {
-      await this.client.setEx(fullKey, ttl, value);
-    } else {
-      await this.client.set(fullKey, value);
+    try {
+      const fullKey = `${config.redis.keyPrefix}${key}`;
+      
+      if (ttl) {
+        await this.client.setEx(fullKey, ttl, value);
+      } else {
+        await this.client.set(fullKey, value);
+      }
+    } catch (error) {
+      logger.warn('Redis set operation failed', { error, key });
     }
   }
 
@@ -92,23 +96,16 @@ class RedisManager {
    */
   public async get(key: string): Promise<string | null> {
     if (!this.client || !this.isConnected) {
-      throw new Error('Redis 連線未建立');
+      return null;
     }
 
-    const fullKey = `${config.redis.keyPrefix}${key}`;
-    return await this.client.get(fullKey);
-  }
-
-  /**
-   * 刪除快取值
-   */
-  public async del(key: string): Promise<void> {
-    if (!this.client || !this.isConnected) {
-      throw new Error('Redis 連線未建立');
+    try {
+      const fullKey = `${config.redis.keyPrefix}${key}`;
+      return await this.client.get(fullKey);
+    } catch (error) {
+      logger.warn('Redis get operation failed', { error, key });
+      return null;
     }
-
-    const fullKey = `${config.redis.keyPrefix}${key}`;
-    await this.client.del(fullKey);
   }
 
   /**
@@ -155,18 +152,15 @@ class RedisManager {
    */
   public async close(): Promise<void> {
     if (this.client) {
-      await this.client.quit();
+      try {
+        await this.client.quit();
+      } catch (error) {
+        logger.warn('Error closing Redis connection', { error });
+      }
       this.client = null;
       this.isConnected = false;
       logger.info('Redis 連線已關閉');
     }
-  }
-
-  /**
-   * 取得客戶端實例
-   */
-  public getClient(): RedisClientType | null {
-    return this.client;
   }
 }
 
@@ -188,5 +182,3 @@ export async function closeRedis(): Promise<void> {
 }
 
 export default redis;
-
-export { redis }
