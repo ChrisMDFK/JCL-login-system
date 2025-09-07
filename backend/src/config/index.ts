@@ -1,5 +1,9 @@
+import dotenv from 'dotenv';
 import fs from 'fs';
 import path from 'path';
+
+// Load environment variables from .env file
+dotenv.config();
 
 // Helper function to read secret files
 const readSecret = (filename: string): string => {
