@@ -188,3 +188,5 @@ export async function closeRedis(): Promise<void> {
 }
 
 export default redis;
+
+export { redis }

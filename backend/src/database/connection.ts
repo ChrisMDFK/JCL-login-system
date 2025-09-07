@@ -1,4 +1,5 @@
 import { Pool } from 'pg';
+import Database from 'better-sqlite3';
 import { config } from '../config';
 import { logger } from '../utils/logger';
 
@@ -14,6 +15,7 @@ import { logger } from '../utils/logger';
  */
 class DatabaseManager {
   private pool: Pool | null = null;
+  private sqlite: Database.Database | null = null;
   private isInitialized = false;
 
   /**
@@ -36,41 +38,69 @@ class DatabaseManager {
       const connectionString = config.database.url;
       logger.info('嘗試連接資料庫', { url: connectionString.replace(/:[^:@]*@/, ':***@') });
 
-      const connectionString = config.database.url;
-      logger.info('嘗試連接資料庫', { url: connectionString.replace(/:[^:@]*@/, ':***@') });
+      if (config.database.url.startsWith('sqlite:')) {
+        // Use SQLite for local development
+        const dbPath = config.database.url.replace('sqlite:', '');
+        this.sqlite = new Database(dbPath);
+        
+        // Create basic tables for development
+        this.sqlite.exec(`
+          CREATE TABLE IF NOT EXISTS users (
+            id TEXT PRIMARY KEY,
+            email TEXT UNIQUE NOT NULL,
+            password_hash TEXT NOT NULL,
+            tenant_id TEXT,
+            created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+            updated_at DATETIME DEFAULT CURRENT_TIMESTAMP
+          );
+          
+          CREATE TABLE IF NOT EXISTS tenants (
+            id TEXT PRIMARY KEY,
+            name TEXT NOT NULL,
+            domain TEXT UNIQUE,
+            created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+            updated_at DATETIME DEFAULT CURRENT_TIMESTAMP
+          );
+        `);
+        
+        logger.info('SQLite database initialized successfully');
+      } else {
+        // Use PostgreSQL for production
+        this.pool = new Pool({
+          connectionString,
+          // PgBouncer 相容設定
+          max: config.database.poolSize,
+          idleTimeoutMillis: 30000,
+          connectionTimeoutMillis: config.database.connectionTimeout,
+          // 關閉預備語句以相容 PgBouncer 交易模式
+          statement_timeout: 30000,
+          query_timeout: 30000,
+          ssl: config.database.ssl ? { rejectUnauthorized: false } : false,
+          // 連線參數設定
+          options: '-c search_path=public'
+        });
 
-      this.pool = new Pool({
-        connectionString,
-        // PgBouncer 相容設定
-        max: config.database.poolSize,
-        idleTimeoutMillis: 30000,
-        connectionTimeoutMillis: config.database.connectionTimeout,
-        // 關閉預備語句以相容 PgBouncer 交易模式
-        statement_timeout: 30000,
-        query_timeout: 30000,
-        ssl: config.database.ssl ? { rejectUnauthorized: false } : false,
-        // 連線參數設定
-        options: '-c search_path=public'
-      });
+        // 連線事件處理
+        this.pool.on('connect', (client) => {
+          logger.debug('新的資料庫連線已建立');
+          // 設定連線參數
+          client.query('SET timezone = "UTC"');
+          client.query('SET statement_timeout = 30000');
+        });
 
-      // 連線事件處理
-      this.pool.on('connect', (client) => {
-        logger.debug('新的資料庫連線已建立');
-        // 設定連線參數
-        client.query('SET timezone = "UTC"');
-        client.query('SET statement_timeout = 30000');
-      });
+        this.pool.on('error', (err) => {
+          logger.error('資料庫連線錯誤', { error: err.message, stack: err.stack });
+        });
 
-      this.pool.on('error', (err) => {
-        logger.error('資料庫連線錯誤', { error: err.message, stack: err.stack });
-      });
+        this.pool.on('remove', (client) => {
+          logger.debug('資料庫連線已移除');
+        });
 
-      this.pool.on('remove', (client) => {
-        logger.debug('資料庫連線已移除');
-      });
-
-      // 測試連線
-      await this.testConnection();
+        // 測試連線
+        await this.testConnection();
+        
+        logger.info('PostgreSQL database initialized successfully');
+      }
       
       this.isInitialized = true;
       logger.info('資料庫連線池初始化成功', {
@@ -82,7 +112,7 @@ class DatabaseManager {
       });
 
     } catch (error) {
-      logger.error('資料庫初始化失敗', { error });
+      logger.error('Database initialization failed', { error });
       throw new Error(`資料庫連線初始化失敗: ${error}`);
     }
   }
@@ -222,12 +252,16 @@ class DatabaseManager {
    * 優雅關機時清理資源
    */
   public async close(): Promise<void> {
-    if (this.pool) {
+    if (this.sqlite) {
+      this.sqlite.close();
+      this.sqlite = null;
+      logger.info('SQLite database connection closed');
+    } else if (this.pool) {
       await this.pool.end();
       this.pool = null;
-      this.isInitialized = false;
-      logger.info('資料庫連線池已關閉');
+      logger.info('PostgreSQL database connection closed');
     }
+    this.isInitialized = false;
   }
 
   /**
