@@ -5,7 +5,7 @@ import compression from 'compression';
 import rateLimit from 'express-rate-limit';
 import 'express-async-errors';
 
-import { config } from './config';
+import config from './config';
 import { logger } from './utils/logger';
 import { errorHandler } from './middleware/error-handler';
 import { requestLogger } from './middleware/request-logger';
