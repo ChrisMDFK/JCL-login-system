@@ -15,15 +15,17 @@ export async function validateTenant(req: Request, res: Response, next: NextFunc
       '/health',
       '/ready',
       '/metrics',
-      '/csp-report'
+      '/csp-report',
+      '/api/auth/login',
+      '/api/auth/register'
     ];
 
     if (skipTenantValidation.some(path => req.path.startsWith(path))) {
       return next();
     }
 
-    // 開發環境下可以跳過租戶驗證
-    if (process.env.NODE_ENV === 'development' && !tenantId) {
+    // 開發環境下可以跳過租戶驗證或使用環境變數設定
+    if ((process.env.NODE_ENV === 'development' || process.env.SKIP_TENANT_VALIDATION === 'true') && !tenantId) {
       logger.warn('開發環境：跳過租戶驗證', {
         path: req.path,
         method: req.method

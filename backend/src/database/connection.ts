@@ -27,14 +27,17 @@ class DatabaseManager {
         return;
       }
 
-      // 解析資料庫 URL 並加入密碼
-      const dbUrl = new URL(config.database.url);
-      if (config.database.password) {
-        dbUrl.password = config.database.password;
+      // 在開發環境中等待資料庫服務啟動
+      if (config.nodeEnv === 'development') {
+        logger.info('開發環境：等待資料庫服務啟動...');
+        await new Promise(resolve => setTimeout(resolve, 5000));
       }
 
+      const connectionString = config.database.url;
+      logger.info('嘗試連接資料庫', { url: connectionString.replace(/:[^:@]*@/, ':***@') });
+
       this.pool = new Pool({
-        connectionString: dbUrl.toString(),
+        connectionString,
         // PgBouncer 相容設定
         max: config.database.poolSize,
         idleTimeoutMillis: 30000,

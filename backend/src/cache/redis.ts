@@ -15,6 +15,12 @@ class RedisManager {
    */
   public async initialize(): Promise<void> {
     try {
+      // 在開發環境中等待 Redis 服務啟動
+      if (config.nodeEnv === 'development') {
+        logger.info('開發環境：等待 Redis 服務啟動...');
+        await new Promise(resolve => setTimeout(resolve, 3000));
+      }
+
       this.client = createClient({
         url: config.redis.url,
         password: config.redis.password,

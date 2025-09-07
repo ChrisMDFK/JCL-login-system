@@ -43,10 +43,10 @@ export const config = {
 
   // 資料庫設定
   database: {
-    url: process.env.DATABASE_URL || 'postgresql://jcl_user:password@localhost:5432/jcl_auth',
+    url: process.env.DATABASE_URL || 'postgresql://jcl_user:jcl_secure_password_2024@localhost:6432/jcl_auth',
     password: process.env.DATABASE_PASSWORD_FILE
       ? readSecretFile(process.env.DATABASE_PASSWORD_FILE)
-      : process.env.DATABASE_PASSWORD || 'password',
+      : process.env.DATABASE_PASSWORD || 'jcl_secure_password_2024',
     ssl: process.env.DATABASE_SSL === 'true',
     poolSize: parseInt(process.env.DATABASE_POOL_SIZE || '25', 10),
     connectionTimeout: parseInt(process.env.DATABASE_CONNECTION_TIMEOUT || '30000', 10)
@@ -57,7 +57,7 @@ export const config = {
     url: process.env.REDIS_URL || 'redis://localhost:6379',
     password: process.env.REDIS_PASSWORD_FILE
       ? readSecretFile(process.env.REDIS_PASSWORD_FILE)
-      : process.env.REDIS_PASSWORD || '',
+      : process.env.REDIS_PASSWORD || 'jcl_redis_password_2024',
     db: parseInt(process.env.REDIS_DB || '0', 10),
     keyPrefix: process.env.REDIS_KEY_PREFIX || 'jcl-auth:',
     sessionTTL: parseInt(process.env.REDIS_SESSION_TTL || '3600', 10), // 1小時
