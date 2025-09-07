@@ -1,0 +1,193 @@
+# JCL 企業級多租戶身分驗證平台
+# Docker Compose 配置檔案 - 生產環境就緒
+version: '3.8'
+
+services:
+  # PostgreSQL 主資料庫
+  postgres:
+    image: postgres:15-alpine
+    container_name: jcl-postgres
+    environment:
+      POSTGRES_DB: jcl_auth
+      POSTGRES_USER: jcl_user
+      POSTGRES_PASSWORD_FILE: /run/secrets/db_password
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+      - ./database/init:/docker-entrypoint-initdb.d
+    secrets:
+      - db_password
+    networks:
+      - jcl-network
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U jcl_user -d jcl_auth"]
+      interval: 30s
+      timeout: 10s
+      retries: 5
+    restart: unless-stopped
+
+  # PgBouncer 連線池管理器
+  pgbouncer:
+    image: pgbouncer/pgbouncer:1.21.0
+    container_name: jcl-pgbouncer
+    environment:
+      DATABASES_HOST: postgres
+      DATABASES_PORT: 5432
+      DATABASES_USER: jcl_user
+      DATABASES_PASSWORD_FILE: /run/secrets/db_password
+      DATABASES_DBNAME: jcl_auth
+      POOL_MODE: transaction
+      MAX_CLIENT_CONN: 1000
+      DEFAULT_POOL_SIZE: 25
+      SERVER_ROUND_ROBIN: 1
+      AUTH_TYPE: scram-sha-256
+    volumes:
+      - ./docker/pgbouncer/pgbouncer.ini:/etc/pgbouncer/pgbouncer.ini:ro
+    secrets:
+      - db_password
+    depends_on:
+      postgres:
+        condition: service_healthy
+    networks:
+      - jcl-network
+    healthcheck:
+      test: ["CMD", "psql", "-h", "localhost", "-p", "6432", "-U", "jcl_user", "-d", "jcl_auth", "-c", "SELECT 1"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+    restart: unless-stopped
+
+  # Redis 快取與會話儲存
+  redis:
+    image: redis:7-alpine
+    container_name: jcl-redis
+    command: redis-server --requirepass-file /run/secrets/redis_password --appendonly yes --appendfsync everysec
+    volumes:
+      - redis_data:/data
+    secrets:
+      - redis_password
+    networks:
+      - jcl-network
+    healthcheck:
+      test: ["CMD", "redis-cli", "--no-auth-warning", "-a", "$(cat /run/secrets/redis_password)", "ping"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+    restart: unless-stopped
+
+  # 後端 API 服務
+  api:
+    build:
+      context: ./backend
+      dockerfile: Dockerfile
+      target: production
+    container_name: jcl-api
+    environment:
+      NODE_ENV: production
+      PORT: 3001
+      DATABASE_URL: postgresql://jcl_user:password@pgbouncer:6432/jcl_auth?pgbouncer=true&prepared_statements=false
+      REDIS_URL: redis://redis:6379
+      JWT_SECRET_FILE: /run/secrets/jwt_secret
+      DATABASE_PASSWORD_FILE: /run/secrets/db_password
+      REDIS_PASSWORD_FILE: /run/secrets/redis_password
+      SMTP_PASSWORD_FILE: /run/secrets/smtp_password
+      OAUTH_CLIENT_SECRET_FILE: /run/secrets/oauth_secret
+      SENTRY_DSN_FILE: /run/secrets/sentry_dsn
+      CORS_ORIGINS: https://jcl-system.com,https://admin.jcl-system.com,https://app.jcl-system.com
+    secrets:
+      - jwt_secret
+      - db_password
+      - redis_password
+      - smtp_password
+      - oauth_secret
+      - sentry_dsn
+    depends_on:
+      pgbouncer:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    networks:
+      - jcl-network
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:3001/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+    restart: unless-stopped
+
+  # 前端應用程式
+  frontend:
+    build:
+      context: ./frontend
+      dockerfile: Dockerfile
+      target: production
+    container_name: jcl-frontend
+    environment:
+      NODE_ENV: production
+      NEXT_PUBLIC_API_URL: https://api.jcl-system.com
+      NEXT_PUBLIC_APP_NAME: JCL 企業身分驗證系統
+    depends_on:
+      - api
+    networks:
+      - jcl-network
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:3000/api/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+    restart: unless-stopped
+
+  # Nginx 反向代理與負載平衡器
+  nginx:
+    image: nginx:1.25-alpine
+    container_name: jcl-nginx
+    ports:
+      - "80:80"
+      - "443:443"
+    volumes:
+      - ./nginx/nginx.conf:/etc/nginx/nginx.conf:ro
+      - ./nginx/conf.d:/etc/nginx/conf.d:ro
+      - ./nginx/ssl:/etc/nginx/ssl:ro
+      - nginx_logs:/var/log/nginx
+    depends_on:
+      - api
+      - frontend
+    networks:
+      - jcl-network
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+    restart: unless-stopped
+
+# Docker 機密管理
+secrets:
+  jwt_secret:
+    file: ./secrets/jwt_secret.txt
+  db_password:
+    file: ./secrets/db_password.txt
+  redis_password:
+    file: ./secrets/redis_password.txt
+  smtp_password:
+    file: ./secrets/smtp_password.txt
+  oauth_secret:
+    file: ./secrets/oauth_secret.txt
+  sentry_dsn:
+    file: ./secrets/sentry_dsn.txt
+
+# 持久化資料卷
+volumes:
+  postgres_data:
+    driver: local
+  redis_data:
+    driver: local
+  nginx_logs:
+    driver: local
+
+# 內部網路
+networks:
+  jcl-network:
+    driver: bridge
+    ipam:
+      config:
+        - subnet: 172.20.0.0/16
